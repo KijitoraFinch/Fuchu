@@ -1,0 +1,8 @@
+[package]
+name = "Fuchu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossbeam = "0.8.4"
+futures = "0.3.31"
