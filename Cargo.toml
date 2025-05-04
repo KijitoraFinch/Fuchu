@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 crossbeam = "0.8.4"
 futures = "0.3.31"
+mio = "1.0.3"

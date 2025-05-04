@@ -79,11 +79,25 @@ impl Executor {
                     let mut task_future = task.task_future.lock().unwrap();
                     let waker = futures::task::waker(Arc::clone(&task));
                     let context = &mut std::task::Context::from_waker(&waker);
-                    if let future = task_future.as_mut() {
-                        let _ = future.poll(context);
+                    match task_future.as_mut().poll(context) {
+                        std::task::Poll::Ready(_) => {
+                            // Task completed
+                            if cfg!(debug_assertions) {
+                                println!("Task {} completed", task.id);
+                            }
+                        }
+                        std::task::Poll::Pending => {
+                            // Task is still pending, continue waiting
+                            if cfg!(debug_assertions) {
+                                println!("Task {} is still pending", task.id);
+                            }
+                        }
                     }
                 }
-                Err(_) => {}
+                Err(_) => {
+                    // Handle the error case
+                    eprintln!("Failed to receive task from queue");
+                }
             }
         }
     }
@@ -92,22 +106,27 @@ impl Executor {
 #[derive(Debug)]
 pub(crate) struct Spawner {
     scheduling_sender: crossbeam::channel::Sender<Arc<Task>>,
+    uniq_counter: usize,
 }
 
 impl Spawner {
     pub(crate) fn new(scheduling_sender: crossbeam::channel::Sender<Arc<Task>>) -> Self {
-        Spawner { scheduling_sender }
+        Spawner {
+            scheduling_sender,
+            uniq_counter: 0,
+        }
     }
 
-    pub(crate) fn spawn<F>(&self, future: F)
+    pub(crate) fn spawn<F>(&mut self, future: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
         let task = Arc::new(Task::new(
-            0,
+            self.uniq_counter,
             Box::pin(future),
             self.scheduling_sender.clone(),
         ));
         self.scheduling_sender.send(task).unwrap();
+        self.uniq_counter += 1;
     }
 }
