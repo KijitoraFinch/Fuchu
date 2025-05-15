@@ -5,36 +5,42 @@ use crossbeam::channel;
 use futures::task::ArcWake;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::future::Future;  // Missing import
 
-pub(crate) struct Runtime {
+/// Main runtime for executing async tasks
+pub struct Runtime {
     executor: Executor,
     spawner: Spawner,
 }
 
 impl Runtime {
-    pub(crate) fn new() -> Self {
+    /// Create a new runtime instance
+    pub fn new() -> Self {
         let (executor, scheduling_sender) = Executor::new();
         let spawner = Spawner::new(scheduling_sender);
         Self { executor, spawner }
     }
 
-    pub(crate) fn run(&self) {
+    /// Run the runtime, processing tasks until completion
+    pub fn run(&self) {
         self.executor.run();
     }
 
-    pub(crate) fn spawner(&self) -> &Spawner {
+    /// Get a reference to the spawner for creating new tasks
+    pub fn spawner(&self) -> &Spawner {
         &self.spawner
     }
 }
 
-pub(crate) struct Task {
-    pub(crate) id: usize,
-    pub(crate) task_future: Mutex<Pin<Box<dyn Future<Output = ()> + Send>>>,
-    pub(crate) scheduling_sender: crossbeam::channel::Sender<Arc<Task>>,
+/// Represents an async task in the runtime
+struct Task {
+    id: usize,
+    task_future: Mutex<Pin<Box<dyn Future<Output = ()> + Send>>>,
+    scheduling_sender: crossbeam::channel::Sender<Arc<Task>>,
 }
 
 impl Task {
-    pub(crate) fn new(
+    fn new(
         id: usize,
         task_future: Pin<Box<dyn Future<Output = ()> + Send>>,
         scheduling_sender: crossbeam::channel::Sender<Arc<Task>>,
@@ -61,18 +67,18 @@ impl ArcWake for Task {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct Executor {
+/// Executes tasks in the runtime
+struct Executor {
     task_queue: crossbeam::channel::Receiver<Arc<Task>>,
 }
 
 impl Executor {
-    pub(crate) fn new() -> (Self, crossbeam::channel::Sender<Arc<Task>>) {
+    fn new() -> (Self, crossbeam::channel::Sender<Arc<Task>>) {
         let (scheduling_sender, task_queue) = crossbeam::channel::unbounded();
         (Executor { task_queue }, scheduling_sender)
     }
 
-    pub(crate) fn run(&self) {
+    fn run(&self) {
         loop {
             match self.task_queue.recv() {
                 Ok(task) => {
@@ -103,21 +109,20 @@ impl Executor {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct Spawner {
+pub struct Spawner {
     scheduling_sender: crossbeam::channel::Sender<Arc<Task>>,
     uniq_counter: usize,
 }
 
 impl Spawner {
-    pub(crate) fn new(scheduling_sender: crossbeam::channel::Sender<Arc<Task>>) -> Self {
+    fn new(scheduling_sender: crossbeam::channel::Sender<Arc<Task>>) -> Self {
         Spawner {
             scheduling_sender,
             uniq_counter: 0,
         }
     }
 
-    pub(crate) fn spawn<F>(&mut self, future: F)
+    pub fn spawn<F>(&mut self, future: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
