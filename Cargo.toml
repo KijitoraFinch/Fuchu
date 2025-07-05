@@ -1,12 +1,12 @@
 [package]
-name = "Fuchu"
+name = "fuchu"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 crossbeam = "0.8.4"
 futures = "0.3.31"
-mio = "1.0.3"
+mio = { version = "1.0.3", features = ["os-ext"] }
 nix = { version = "0.30.1", features = ["event"] }
 tracing = "0.1.41"
 
