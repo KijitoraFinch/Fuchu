@@ -87,3 +87,28 @@ impl<'a> Future for WriteFuture<'a> {
         }
     }
 }
+
+pub struct TimerFuture {
+    deadline: std::time::Instant,
+}
+
+impl TimerFuture {
+    pub fn new(duration: std::time::Duration) -> Self {
+        Self {
+            deadline: std::time::Instant::now() + duration,
+        }
+    }
+}
+
+impl Future for TimerFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if std::time::Instant::now() >= self.deadline {
+            Poll::Ready(())
+        } else {
+            reactor().register_timer(self.deadline, cx.waker().clone());
+            Poll::Pending
+        }
+    }
+}
