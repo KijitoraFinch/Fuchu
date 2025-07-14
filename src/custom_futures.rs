@@ -112,3 +112,54 @@ impl Future for TimerFuture {
         }
     }
 }
+
+pub struct CancellableTimerFuture {
+    deadline: std::time::Instant,
+    timer_id: Option<usize>,
+    cancelled: bool,
+}
+
+impl CancellableTimerFuture {
+    pub fn new(duration: std::time::Duration) -> Self {
+        Self {
+            deadline: std::time::Instant::now() + duration,
+            timer_id: None,
+            cancelled: false,
+        }
+    }
+    
+    pub fn cancel(&mut self) {
+        self.cancelled = true;
+        if let Some(timer_id) = self.timer_id {
+            reactor().unregister_timer(timer_id);
+        }
+    }
+}
+
+impl Future for CancellableTimerFuture {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.cancelled {
+            return Poll::Ready(());
+        }
+        
+        if std::time::Instant::now() >= self.deadline {
+            Poll::Ready(())
+        } else {
+            if self.timer_id.is_none() {
+                let id = reactor().register_timer(self.deadline, cx.waker().clone());
+                self.timer_id = Some(id);
+            }
+            Poll::Pending
+        }
+    }
+}
+
+impl Drop for CancellableTimerFuture {
+    fn drop(&mut self) {
+        if let Some(timer_id) = self.timer_id {
+            reactor().unregister_timer(timer_id);
+        }
+    }
+}

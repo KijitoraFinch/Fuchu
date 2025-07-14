@@ -145,6 +145,7 @@ impl RuntimeBuilder {
 pub struct Reactor {
     waker_lookup: std::collections::HashMap<std::os::fd::RawFd, std::task::Waker>,
     timeout_lookup: std::collections::BTreeMap<std::time::Instant, std::task::Waker>,
+    timer_id_lookup: std::collections::HashMap<usize, std::time::Instant>,
     registry_channel: crossbeam::channel::Receiver<RegistryRequest>,
 }
 
@@ -155,6 +156,7 @@ impl Reactor {
             Reactor {
                 waker_lookup: std::collections::HashMap::new(),
                 timeout_lookup: std::collections::BTreeMap::new(),
+                timer_id_lookup: std::collections::HashMap::new(),
                 registry_channel: receiver,
             },
             sender,
@@ -198,9 +200,12 @@ impl Reactor {
                     }
                     RegistryRequest::RegisterTimer { timer, id, waker } => {
                         self.timeout_lookup.insert(timer, waker);
+                        self.timer_id_lookup.insert(id, timer);
                     }
                     RegistryRequest::UnregisterTimer { id } => {
-                        todo!("なんとかする");
+                        if let Some(timer_instant) = self.timer_id_lookup.remove(&id) {
+                            self.timeout_lookup.remove(&timer_instant);
+                        }
                     }
                 }
             }
@@ -216,6 +221,8 @@ impl Reactor {
             }
             for (timer, waker) in expired_timers {
                 self.timeout_lookup.remove(&timer);
+                // Find and remove the corresponding timer ID
+                self.timer_id_lookup.retain(|_, instant| *instant != timer);
                 waker.wake();
             }
 
@@ -263,15 +270,21 @@ impl ReactorHandle {
             .expect("Failed to send unregister request");
     }
 
-    pub fn register_timer(&self, timer: std::time::Instant, waker: std::task::Waker) {
+    pub fn register_timer(&self, timer: std::time::Instant, waker: std::task::Waker) -> usize {
+        // Generate a unique timer ID - for now, we'll use a simple counter approach
+        // In a real implementation, this would need to be thread-safe
+        static TIMER_ID_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+        let id = TIMER_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        
         let request = RegistryRequest::RegisterTimer {
             timer,
-            id: 0, // TODO: Implement ID management for timers
+            id,
             waker,
         };
         self.sender
             .send(request)
             .expect("Failed to send register timer request");
+        id
     }
 
     pub fn unregister_timer(&self, id: usize) {
