@@ -90,12 +90,14 @@ impl<'a> Future for WriteFuture<'a> {
 
 pub struct TimerFuture {
     deadline: std::time::Instant,
+    timer_id: Option<usize>,
 }
 
 impl TimerFuture {
     pub fn new(duration: std::time::Duration) -> Self {
         Self {
             deadline: std::time::Instant::now() + duration,
+            timer_id: None,
         }
     }
 }
@@ -103,11 +105,14 @@ impl TimerFuture {
 impl Future for TimerFuture {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if std::time::Instant::now() >= self.deadline {
             Poll::Ready(())
         } else {
-            reactor().register_timer(self.deadline, cx.waker().clone());
+            if self.timer_id.is_none() {
+                let id = reactor().register_timer(self.deadline, cx.waker().clone());
+                self.timer_id = Some(id);
+            }
             Poll::Pending
         }
     }

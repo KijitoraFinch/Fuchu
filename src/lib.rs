@@ -7,7 +7,7 @@ use futures::{future::BoxFuture, task::ArcWake};
 use std::{
     cell::RefCell,
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -144,7 +144,7 @@ impl RuntimeBuilder {
 
 pub struct Reactor {
     waker_lookup: std::collections::HashMap<std::os::fd::RawFd, std::task::Waker>,
-    timeout_lookup: std::collections::BTreeMap<std::time::Instant, std::task::Waker>,
+    timeout_lookup: std::collections::BTreeMap<std::time::Instant, Vec<(usize, std::task::Waker)>>,
     registry_channel: crossbeam::channel::Receiver<RegistryRequest>,
 }
 
@@ -197,10 +197,24 @@ impl Reactor {
                         self.waker_lookup.remove(&fd);
                     }
                     RegistryRequest::RegisterTimer { timer, id, waker } => {
-                        self.timeout_lookup.insert(timer, waker);
+                        self.timeout_lookup
+                            .entry(timer)
+                            .or_insert_with(Vec::new)
+                            .push((id, waker));
                     }
                     RegistryRequest::UnregisterTimer { id } => {
-                        todo!("なんとかする");
+                        // Find and remove the timer with the matching ID
+                        let mut entries_to_remove = Vec::new();
+                        for (instant, timers) in &mut self.timeout_lookup {
+                            timers.retain(|(timer_id, _)| *timer_id != id);
+                            if timers.is_empty() {
+                                entries_to_remove.push(*instant);
+                            }
+                        }
+                        // Remove empty entries
+                        for instant in entries_to_remove {
+                            self.timeout_lookup.remove(&instant);
+                        }
                     }
                 }
             }
@@ -211,11 +225,23 @@ impl Reactor {
             let now = Instant::now();
             // Process the timers before processing the events.
             let mut expired_timers = Vec::new();
-            for (timer, waker) in self.timeout_lookup.range(..=now) {
-                expired_timers.push((timer.clone(), waker.clone()));
+            for (timer, timer_list) in self.timeout_lookup.range(..=now) {
+                for (id, waker) in timer_list {
+                    expired_timers.push((timer.clone(), *id, waker.clone()));
+                }
             }
-            for (timer, waker) in expired_timers {
+            // Remove expired timers and wake them
+            let mut entries_to_remove = Vec::new();
+            for (timer, _timer_list) in &mut self.timeout_lookup {
+                if *timer <= now {
+                    entries_to_remove.push(*timer);
+                }
+            }
+            for timer in entries_to_remove {
                 self.timeout_lookup.remove(&timer);
+            }
+            // Wake all expired timers
+            for (_, _, waker) in expired_timers {
                 waker.wake();
             }
 
@@ -234,19 +260,24 @@ impl Reactor {
 
 pub struct ReactorHandle {
     sender: channel::Sender<RegistryRequest>,
+    timer_id_counter: Arc<AtomicUsize>,
 }
 
 impl Clone for ReactorHandle {
     fn clone(&self) -> Self {
         ReactorHandle {
             sender: self.sender.clone(),
+            timer_id_counter: self.timer_id_counter.clone(),
         }
     }
 }
 
 impl ReactorHandle {
     pub fn new(sender: channel::Sender<RegistryRequest>) -> Self {
-        ReactorHandle { sender }
+        ReactorHandle { 
+            sender,
+            timer_id_counter: Arc::new(AtomicUsize::new(1)),
+        }
     }
 
     pub fn register(&self, fd: std::os::fd::RawFd, waker: std::task::Waker) {
@@ -263,15 +294,17 @@ impl ReactorHandle {
             .expect("Failed to send unregister request");
     }
 
-    pub fn register_timer(&self, timer: std::time::Instant, waker: std::task::Waker) {
+    pub fn register_timer(&self, timer: std::time::Instant, waker: std::task::Waker) -> usize {
+        let id = self.timer_id_counter.fetch_add(1, Ordering::SeqCst);
         let request = RegistryRequest::RegisterTimer {
             timer,
-            id: 0, // TODO: Implement ID management for timers
+            id,
             waker,
         };
         self.sender
             .send(request)
             .expect("Failed to send register timer request");
+        id
     }
 
     pub fn unregister_timer(&self, id: usize) {
