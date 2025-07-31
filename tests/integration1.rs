@@ -103,7 +103,7 @@ fn test_echo_server_performance() {
 
 // this test should panic
 #[test]
-#[should_panic()]
+#[should_panic]
 fn test_reactor_outside_runtime() {
     fuchu::reactor();
 }
