@@ -14,9 +14,7 @@ impl Executor {
     }
 
     pub fn run(&self, reactor_handle: ReactorHandle) {
-        // set the reactor handle in the thread-local storage
-        // so that it can be accessed by the futures spawned in this executor
-        let _guard = crate::reactor();
+        crate::reactor_handle_to_thread_local(reactor_handle);
 
         while let Ok(task) = self.task_queue.recv() {
             let mut future = task.future.lock().unwrap();

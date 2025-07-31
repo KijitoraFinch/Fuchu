@@ -1,5 +1,5 @@
 use fuchu::custom_futures::TimerFuture;
-use fuchu::{RuntimeBuilder, reactor};
+use fuchu::{runtime::RuntimeBuilder, reactor};
 use futures::channel::oneshot;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};

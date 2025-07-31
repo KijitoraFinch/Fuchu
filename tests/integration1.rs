@@ -1,5 +1,8 @@
 use fuchu::custom_futures::TimerFuture;
-use fuchu::{Runtime, RuntimeBuilder, Spawner};
+use fuchu::{
+    runtime::{Runtime, RuntimeBuilder},
+    spawner::Spawner,
+};
 use futures::channel::oneshot;
 use std::os::fd::AsRawFd;
 use std::{
